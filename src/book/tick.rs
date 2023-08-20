@@ -53,6 +53,8 @@ impl Tick {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use super::*;
     use crate::book::order::{OrderDirection, OrderType};
 
@@ -63,7 +65,7 @@ mod tests {
                 i,
                 *tick.tick_id(),
                 0,
-                Account::new(i, AccountType::Individual),
+                Rc::new(RefCell::new(Account::new(i, AccountType::Individual))),
                 OrderType::Market,
                 OrderDirection::Bid,
                 quantity_per_order,
@@ -100,7 +102,7 @@ mod tests {
             0,
             *tick.tick_id(),
             0,
-            Account::new(0, AccountType::Individual),
+            Rc::new(RefCell::new(Account::new(0, AccountType::Individual))),
             OrderType::Limit,
             OrderDirection::Bid,
             100,
@@ -125,7 +127,7 @@ mod tests {
             0,
             *tick.tick_id(),
             0,
-            Account::new(0, AccountType::Individual),
+            Rc::new(RefCell::new(Account::new(0, AccountType::Individual))),
             OrderType::Market,
             OrderDirection::Bid,
             100,

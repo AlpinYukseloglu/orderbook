@@ -4,6 +4,7 @@ use crate::bank::account::*;
 use crate::bank::currency::*;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::error::Error;
 use std::process;
 
 struct Orderbook {
@@ -35,18 +36,18 @@ impl Orderbook {
         }
     }
 
-    fn handle_order(&mut self, order: &mut Order) {
-        // TODO: subtract balance here with a check that returns error/result
-        
+    fn handle_order(&mut self, order: &mut Order) -> Result<(), Box<dyn Error>> {
         match order.order_type() {
             OrderType::Market => {
-                self.run_market_order(order)
+                self.run_market_order(order)?
             }
             OrderType::Limit => {
-                self.run_partial_or_full_limit(order);
+                self.run_partial_or_full_limit(order)?
             }
         }
+        Ok(())
     }
+    
 
     fn cancel_order(&mut self, order_id: u64) {}
 
@@ -56,17 +57,23 @@ impl Orderbook {
     }
 
     // Place limit on specified tick and properly handle error if there is an issue.
-    fn run_place_limit(&mut self, order: Order) {
+    fn run_place_limit(&mut self, order: &mut Order) -> Result<(), Box<dyn Error>>{
         let tick_id = *order.tick_id();
         let tick = self.get_or_init_tick_in_tree(tick_id);
-        if let Err(e) = tick.place_limit(order) {
-            println!("Problem placing limit order: {}", e);
-            process::exit(1);
-        }
+
+        // Withdraw the assets placed in the books from the trader's balances
+        order.withdraw_deposited_assets(*order.quantity(), tick_id)?;
+
+        // Clone order and pass in cloned version
+        let order_clone = order.clone();
+
+        tick.place_limit(order_clone)?;
+
+        Ok(())
     }
 
     // Implement market bid abstraction that takes in a start tick and fills ticks as bids
-    fn run_market_bid(&mut self, order: &mut Order, end_tick: u64, quantity: u64) -> u64 {
+    fn run_market_bid(&mut self, order: &mut Order, end_tick: u64, quantity: u64) -> Result<u64, Box<dyn Error>> {
         let mut remaining_quantity = quantity;
         let mut to_remove = Vec::new();
     
@@ -91,7 +98,8 @@ impl Orderbook {
                     remaining_quantity = tick.fill_tick(remaining_quantity);
                     let filled_quantity = pre_fill_remaining - remaining_quantity;
 
-                    // Distribute purchased assets to order owner
+                    // Apply the exchange to the trader's balances
+                    order.withdraw_deposited_assets(filled_quantity, *tick.tick_id())?;
                     order.distribute_filled_assets(filled_quantity, *tick.tick_id());
     
                     // If tick was fully filled, set to remove it from the book
@@ -107,12 +115,12 @@ impl Orderbook {
             self.ticks.remove(&tick_id);
         }
 
-        return remaining_quantity;
+        return Ok(remaining_quantity);
     }
     
 
     // Implement market ask abstraction that takes in a start tick and fills ticks as asks
-    fn run_market_ask(&mut self, order: &mut Order, end_tick: u64, quantity: u64) -> u64 {
+    fn run_market_ask(&mut self, order: &mut Order, end_tick: u64, quantity: u64) -> Result<u64, Box<dyn Error>> {
         let mut remaining_quantity = quantity;
         let mut to_remove = Vec::new();
     
@@ -136,7 +144,8 @@ impl Orderbook {
                     remaining_quantity = tick.fill_tick(remaining_quantity);
                     let filled_quantity = pre_fill_remaining - remaining_quantity;
 
-                    // Distribute purchased assets to order owner
+                    // Apply the exchange to the trader's balances
+                    order.withdraw_deposited_assets(filled_quantity, *tick.tick_id())?;
                     order.distribute_filled_assets(filled_quantity, *tick.tick_id());
                     
                     // If tick was fully filled, set to it from the book
@@ -152,65 +161,67 @@ impl Orderbook {
             self.ticks.remove(&tick_id);
         }
 
-        return remaining_quantity;
+        return Ok(remaining_quantity);
     }
 
     // handle partial limits
-    fn run_partial_or_full_limit(&mut self, order: &mut Order) {
+    fn run_partial_or_full_limit(&mut self, order: &mut Order) -> Result<(), Box<dyn Error>> {
         let tick_id = *order.tick_id();
-                let mut remaining_quantity = *order.quantity();
-                match order.order_direction() {
-                    OrderDirection::Bid => {
-                        // If the bid is past the lowest ask, immediately fill the appropriate portion of the order.
-                        if tick_id > self.next_ask_tick {
-                            remaining_quantity = self.run_market_bid(order, tick_id, remaining_quantity)
-                        }
-                        
-                        if remaining_quantity > 0 && self.next_ask_tick != u64::MAX {
-                            order.set_quantity(remaining_quantity);
-
-                            // We clone here because we don't own `order`, just a mutable reference to it.
-                            let cloned_order = order.clone();
-                            self.run_place_limit(cloned_order);
-                        }
-                    }
-                    OrderDirection::Ask => {
-                        // If the ask is past the highest bid, immediately fill the appropriate portion of the order.
-                        if tick_id < self.next_bid_tick {
-                            remaining_quantity = self.run_market_ask(order, tick_id, remaining_quantity)
-                        }
-
-                        if remaining_quantity > 0 && self.next_bid_tick != u64::MIN {
-                            order.set_quantity(remaining_quantity);
-
-                            // We clone here because we don't own `order`, just a mutable reference to it.
-                            let cloned_order = order.clone();
-                            self.run_place_limit(cloned_order);
-                        }
-                    }
+        let mut remaining_quantity = *order.quantity();
+        match order.order_direction() {
+            OrderDirection::Bid => {
+                // If the bid is past the lowest ask, immediately fill the appropriate portion of the order.
+                if tick_id > self.next_ask_tick {
+                    remaining_quantity = self.run_market_bid(order, tick_id, remaining_quantity)?;
                 }
+                
+                if remaining_quantity > 0 && self.next_ask_tick != u64::MAX {
+                    order.set_quantity(remaining_quantity);
+                    self.run_place_limit(order);
+                }
+            }
+            OrderDirection::Ask => {
+                // If the ask is past the highest bid, immediately fill the appropriate portion of the order.
+                if tick_id < self.next_bid_tick {
+                    remaining_quantity = self.run_market_ask(order, tick_id, remaining_quantity)?;
+                }
+
+                if remaining_quantity > 0 && self.next_bid_tick != u64::MIN {
+                    order.set_quantity(remaining_quantity);
+                    self.run_place_limit(order);
+                }
+            }
+        }
+
+        Ok(())
     }
 
-    fn run_market_order(&mut self, order: &mut Order) {
+    fn run_market_order(&mut self, order: &mut Order) -> Result<(), Box<dyn Error>> {
         // In both cases, we let the return value drop quietly. This is the equivalent of not erroring if the market runs out of ticks,
         // which is appropriate behavior for a market order that is large enough to clear the book.
         let remaining_quantity = *order.quantity();
         match order.order_direction() {
             OrderDirection::Bid => {
-                self.run_market_bid(order, u64::MIN, remaining_quantity);
+                self.run_market_bid(order, u64::MIN, remaining_quantity)?;
             }
             OrderDirection::Ask => {
-                self.run_market_ask(order, u64::MAX, remaining_quantity);
+                self.run_market_ask(order, u64::MAX, remaining_quantity)?;
             }
         }
+        Ok(())
     }
+        
     
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
     use super::*;
-    use crate::bank::currency::Currency;
+    use crate::{bank::currency::Currency, book::order};
+
+    const BASE_OSMO_AMT: u64 = 10000;
+    const BASE_USD_AMT: u64 = 100000;
 
     // Test helper that creates a specified number of orders of equal quantity on the passed in tick
     fn create_limit_orders(book: &mut Orderbook, tick_id: &mut u64, num_orders: u64, quantity: u64, order_direction: &OrderDirection) {
@@ -219,7 +230,7 @@ mod tests {
                 i,
                 *tick_id,
                 0,
-                Account::new(i, AccountType::Individual),
+                Rc::new(RefCell::new(Account::new(i, AccountType::Individual))),
                 OrderType::Limit,
                 *order_direction,
                 quantity,
@@ -233,6 +244,12 @@ mod tests {
             }
 
         }
+    }
+
+    // Helper that funds account with 100000 USD and 10000 OSMO
+    fn fund_account_for_order(order: &mut Order) {
+        order.owner().borrow_mut().deposit(Currency::USD, BASE_USD_AMT);
+        order.owner().borrow_mut().deposit(Currency::OSMO, BASE_OSMO_AMT);
     }
 
     // implement test case where the order book's next ask tick is 10, and there are orders on ticks 10 to 15 (using helper above)
@@ -257,12 +274,16 @@ mod tests {
             13,
             0,
             0,
-            Account::new(0, AccountType::Individual),
+            Rc::new(RefCell::new(Account::new(0, AccountType::Individual))),
             OrderType::Market,
             OrderDirection::Ask,
             1000,
         );
-        book.run_market_ask(&mut order, u64::MAX, 1000);
+
+        fund_account_for_order(&mut order);
+        
+        // System under test
+        book.run_market_ask(&mut order, u64::MAX, 1000).unwrap();
 
         // ticks 10, 13, and 14 should all be emptied and removed from the book
         assert!(!book.ticks.contains_key(&10));
@@ -279,7 +300,7 @@ mod tests {
         assert_eq!(book.next_ask_tick, 21);
 
         // We expect the USD balance to be equal to the quantity filled at each tick times the prices at each tick
-        assert_eq!(order.owner().balance(Currency::USD), 300 * (10 + 13 + 14) + 100 * 21);
+        assert_eq!(order.owner().borrow_mut().balance(Currency::USD), BASE_USD_AMT + 300 * (10 + 13 + 14) + 100 * 21);
     }
 
     // implement a similar run market ask test but with a specified end tick at 15
@@ -300,16 +321,22 @@ mod tests {
 
         // run market ask for 1000 quantity
         // since market depth is 1200 (four ticks with 300 each), this should fill up to tick 15
+        let acc = Rc::new(RefCell::new(Account::new(0, AccountType::Individual)));
         let mut order = Order::new(
             13,
             0,
             0,
-            Account::new(0, AccountType::Individual),
+            Rc::clone(&acc),
             OrderType::Market,
             OrderDirection::Ask,
             1000,
         );
-        book.run_market_ask(&mut order, 21, 1000);
+
+        // Fund order account
+        fund_account_for_order(&mut order);
+
+        // System under test
+        book.run_market_ask(&mut order, 21, 1000).unwrap();
 
         // ticks 10, 13, and 14 should all be emptied and removed from the book
         assert!(!book.ticks.contains_key(&10));
@@ -326,7 +353,7 @@ mod tests {
         assert_eq!(book.next_ask_tick, 21);
 
         // We expect the USD balance to be equal to the quantity filled at each tick times the prices at each tick
-        assert_eq!(order.owner().balance(Currency::USD), 300 * (10 + 13 + 14));
+        assert_eq!(order.owner().borrow_mut().balance(Currency::USD), BASE_USD_AMT + 300 * (10 + 13 + 14));
     }
 
     // implement test for run_market_bid, which is similar to ask but in the opposite tick direction
@@ -349,12 +376,16 @@ mod tests {
             13,
             0,
             0,
-            Account::new(0, AccountType::Individual),
+            Rc::new(RefCell::new(Account::new(0, AccountType::Individual))),
             OrderType::Market,
             OrderDirection::Bid,
             1000,
         );
-        book.run_market_bid(&mut order, u64::MIN, 1000);
+
+        fund_account_for_order(&mut order);
+
+        // System under test
+        book.run_market_bid(&mut order, u64::MIN, 1000).unwrap();
 
         // ticks 10, 13, and 14 should all be emptied and removed from the book
         assert!(!book.ticks.contains_key(&13));
@@ -371,7 +402,7 @@ mod tests {
         assert_eq!(book.next_bid_tick, 10);
 
         // We expect the OSMO balance to be equal to the quantity filled on each tick
-        assert_eq!(order.owner().balance(Currency::OSMO), 300 * 3 + 100 * 1);
+        assert_eq!(order.owner().borrow_mut().balance(Currency::OSMO), BASE_OSMO_AMT + 300 * 3 + 100 * 1);
     }
 
     // now write test with cutoff on 13
@@ -394,12 +425,16 @@ mod tests {
             13,
             0,
             0,
-            Account::new(0, AccountType::Individual),
+            Rc::new(RefCell::new(Account::new(0, AccountType::Individual))),
             OrderType::Market,
             OrderDirection::Bid,
             1000,
         );
-        book.run_market_bid(&mut order, 13, 1000);
+
+        fund_account_for_order(&mut order);
+
+        // System under test
+        book.run_market_bid(&mut order, 13, 1000).unwrap();
 
         // ticks 14 and 21 should be emptied and removed from the book
         assert!(!book.ticks.contains_key(&14));
@@ -417,6 +452,6 @@ mod tests {
         assert_eq!(book.next_bid_tick, 13);
 
         // We expect the OSMO balance to be equal to the quantity filled on each tick
-        assert_eq!(order.owner().balance(Currency::OSMO), 300 * 2);
+        assert_eq!(order.owner().borrow_mut().balance(Currency::OSMO), BASE_OSMO_AMT +  300 * 2);
     }
 }

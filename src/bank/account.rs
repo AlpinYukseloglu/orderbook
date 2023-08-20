@@ -16,7 +16,6 @@ pub struct Account {
 }
 
 impl Account {
-    // constructor
     pub fn new(acc_id: u64, acc_type: AccountType) -> Account {
         Account {
             account_id: acc_id,
@@ -30,9 +29,14 @@ impl Account {
         *balance += amount;
     }
 
-    pub fn withdraw(&mut self, currency: Currency, amount: u64) {
+    // withdraw but return Result error if insufficient funds
+    pub fn withdraw(&mut self, currency: Currency, amount: u64) -> Result<(), &'static str> {
         let balance = self.balances.entry(currency).or_insert(0);
+        if *balance < amount {
+            return Err("Insufficient funds");
+        }
         *balance -= amount;
+        Ok(())
     }
 
     // check balance

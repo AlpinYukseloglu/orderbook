@@ -1,6 +1,9 @@
 use getset::Getters;
 use crate::bank::account::Account;
 use crate::bank::currency::Currency;
+use std::cell::RefCell;
+use std::error::Error;
+use std::rc::Rc;
 
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum OrderType {
@@ -23,7 +26,7 @@ pub struct Order {
     #[get = "pub"]
     book_id: u64,
     #[get = "pub"]
-    owner: Account,
+    owner: Rc<RefCell<Account>>,
     #[get = "pub"]
     order_type: OrderType,
     #[get = "pub"]
@@ -37,7 +40,7 @@ impl Order {
         order_id: u64,
         tick_id: u64,
         book_id: u64,
-        owner: Account,
+        owner: Rc<RefCell<Account>>,
         order_type: OrderType,
         order_direction: OrderDirection,
         quantity: u64,
@@ -81,13 +84,28 @@ impl Order {
     pub fn distribute_filled_assets(&mut self, amount_filled: u64, price_per_filled_unit: u64) {
         match self.order_direction {
             OrderDirection::Bid => {
-                self.owner.deposit(Currency::OSMO, amount_filled);
+                self.owner.borrow_mut().deposit(Currency::OSMO, amount_filled);
             },
             OrderDirection::Ask => {
-                self.owner.deposit(Currency::USD, amount_filled * price_per_filled_unit);
+                self.owner.borrow_mut().deposit(Currency::USD, amount_filled * price_per_filled_unit);
             },
         }
     }
+
+    // withdraw_deposited assets is simple a mirrored version of distribute_filled_assets since it's for providing
+    // the other side of the order.
+    pub fn withdraw_deposited_assets(&mut self, amount_filled: u64, price_per_filled_unit: u64) -> Result<(), Box<dyn Error>> {
+        match self.order_direction {
+            OrderDirection::Bid => {
+                self.owner.borrow_mut().withdraw(Currency::USD, amount_filled * price_per_filled_unit)?;
+            },
+            OrderDirection::Ask => {
+                self.owner.borrow_mut().withdraw(Currency::OSMO, amount_filled)?;
+            },
+        }
+        Ok(())
+    }
+    
 }
 
 // write unit tests for fill_order
@@ -102,7 +120,7 @@ mod tests {
             0,
             5,
             0,
-            Account::new(0, AccountType::Individual),
+            Rc::new(RefCell::new(Account::new(0, AccountType::Individual))),
             OrderType::Limit,
             OrderDirection::Bid,
             100,
@@ -127,7 +145,7 @@ mod tests {
         assert_eq!(*order.quantity(), 0);
 
         // Sanity check that the owner's balance is 100.
-        assert_eq!(order.owner.balance(Currency::OSMO), 100);
+        assert_eq!(order.owner.borrow_mut().balance(Currency::OSMO), 100);
     }
 
     // implement test for ask
@@ -137,7 +155,7 @@ mod tests {
             0,
             5,
             0,
-            Account::new(0, AccountType::Individual),
+            Rc::new(RefCell::new(Account::new(0, AccountType::Individual))),
             OrderType::Limit,
             OrderDirection::Ask,
             100,
@@ -162,6 +180,6 @@ mod tests {
         assert_eq!(*order.quantity(), 0);
 
         // Sanity check that the owner's balance is 500 USD since 100 OSMO was sold at tick 5 (5 USD per OSMO).
-        assert_eq!(order.owner.balance(Currency::USD), 500);
+        assert_eq!(order.owner.borrow_mut().balance(Currency::USD), 500);
     }
 }
