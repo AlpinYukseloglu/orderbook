@@ -1,3 +1,5 @@
+use getset::Getters;
+
 use super::order::*;
 use super::tick::Tick;
 use crate::bank::account::*;
@@ -7,9 +9,12 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::process;
 
-struct Orderbook {
+#[derive(Getters)]
+pub struct Orderbook {
     book_id: u64,
+    #[get = "pub"]
     quote_asset: Currency,
+    #[get = "pub"]
     base_asset: Currency,
     next_bid_tick: u64,
     next_ask_tick: u64,
@@ -18,7 +23,7 @@ struct Orderbook {
 }
 
 impl Orderbook {
-    fn new(book_id: u64) -> Orderbook {
+    pub fn new(book_id: u64) -> Orderbook {
         // Initialize min and max ticks in cancellation map.
         // This is to track whether the book has run out of ticks when doing market orders.
         let mut cancellation_map = HashMap::new();
@@ -29,14 +34,14 @@ impl Orderbook {
             book_id: book_id,
             quote_asset: Currency::OSMO,
             base_asset: Currency::USD,
-            next_bid_tick: u64::MAX,
-            next_ask_tick: u64::MIN,
+            next_bid_tick: u64::MIN,
+            next_ask_tick: u64::MAX,
             ticks: BTreeMap::new(),
             cancellation_map: cancellation_map,
         }
     }
 
-    fn handle_order(&mut self, order: &mut Order) -> Result<(), Box<dyn Error>> {
+    pub fn handle_order(&mut self, order: &mut Order) -> Result<(), Box<dyn Error>> {
         match order.order_type() {
             OrderType::Market => {
                 self.run_market_order(order)?
@@ -68,6 +73,21 @@ impl Orderbook {
         let order_clone = order.clone();
 
         tick.place_limit(order_clone)?;
+
+        // If bid and tick_id is higher than next bid tick, update next bid tick
+        // If ask and tick_id is lower than next ask tick, update next ask tick
+        match order.order_direction() {
+            OrderDirection::Bid => {
+                if tick_id > self.next_bid_tick {
+                    self.next_bid_tick = tick_id;
+                }
+            }
+            OrderDirection::Ask => {
+                if tick_id < self.next_ask_tick {
+                    self.next_ask_tick = tick_id;
+                }
+            }
+        }
 
         Ok(())
     }
@@ -177,7 +197,7 @@ impl Orderbook {
                 
                 if remaining_quantity > 0 && self.next_ask_tick != u64::MAX {
                     order.set_quantity(remaining_quantity);
-                    self.run_place_limit(order);
+                    self.run_place_limit(order)?;
                 }
             }
             OrderDirection::Ask => {
@@ -188,7 +208,7 @@ impl Orderbook {
 
                 if remaining_quantity > 0 && self.next_bid_tick != u64::MIN {
                     order.set_quantity(remaining_quantity);
-                    self.run_place_limit(order);
+                    self.run_place_limit(order)?;
                 }
             }
         }

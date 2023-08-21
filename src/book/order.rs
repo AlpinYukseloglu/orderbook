@@ -1,17 +1,18 @@
 use getset::Getters;
+use strum_macros::ToString;
 use crate::bank::account::Account;
 use crate::bank::currency::Currency;
 use std::cell::RefCell;
 use std::error::Error;
 use std::rc::Rc;
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Copy, Clone, Debug, ToString)]
 pub enum OrderType {
     Market,
     Limit,
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Copy, Clone, Debug, ToString)]
 pub enum OrderDirection {
     Bid,
     Ask,
