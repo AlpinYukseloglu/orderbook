@@ -62,4 +62,7 @@ cargo build
     cargo run
     ```
 
-2. Interact with the terminal UI to place orders, view balances, and more (using the commands described above).
+2. Interact with the terminal UI to place orders, view balances, and more (using the commands described above):
+    ```bash
+    [buy/sell] [osmo/usd] [market/limit] [amount] [price if limit]
+    ```
