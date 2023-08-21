@@ -4,13 +4,20 @@ use orderbook::ui::{
     handler::handle_key_events,
     tui::Tui,
 };
-use std::io;
+use orderbook::bank::account::{Account, AccountType};
+use orderbook::bank::currency::Currency;
+use orderbook::book::orderbook::{Orderbook};
+use std::{io, rc::Rc, cell::RefCell};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
 fn main() -> AppResult<()> {
     // Create an application.
     let mut app = App::new();
+
+    // Fund user with starting balance
+    app.user_account.borrow_mut().deposit(Currency::OSMO, 100000);
+    app.user_account.borrow_mut().deposit(Currency::USD, 500000);
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(io::stderr());

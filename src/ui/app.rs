@@ -1,4 +1,8 @@
+use std::cell::RefCell;
 use std::error;
+use std::rc::Rc;
+use crate::book::orderbook::Orderbook;
+use crate::bank::account::{Account, AccountType};
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
@@ -11,6 +15,12 @@ pub struct App {
     pub updates: Vec<String>,
     pub positions: Vec<u64>,
     pub command_line: String,
+
+    // session orderbook
+    pub session_book: Orderbook,
+
+    // user account
+    pub user_account: Rc<RefCell<Account>>,
 }
 
 impl Default for App {
@@ -21,6 +31,8 @@ impl Default for App {
             updates: vec![String::new()],
             positions: vec![0],
             command_line: String::new(),
+            session_book: Orderbook::new(0),
+            user_account: Rc::new(RefCell::new(Account::new(0, AccountType::Individual))),
         }
     }
 }

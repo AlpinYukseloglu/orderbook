@@ -1,13 +1,14 @@
 use crate::ui::app::App;
 use tui::{
     layout::{Constraint, Direction, Layout, Alignment},
-    widgets::{BarChart, Block, Borders, Paragraph, Sparkline},
+    widgets::{BarChart, Block, Borders, Paragraph, Sparkline, canvas::Canvas},
     style::{Style, Color, Modifier},
     text::{Spans, Span},
     backend::Backend,
     Frame,
 };
 use rand::{Rng, thread_rng};
+use crate::bank::currency::Currency;
 
 pub fn render<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>) {
     let size = frame.size();
@@ -17,10 +18,9 @@ pub fn render<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>) {
     .constraints(
         [
             Constraint::Percentage(50), // Orderbook
-            Constraint::Percentage(10), // Prices
-            Constraint::Percentage(15), // User balances
-            Constraint::Percentage(15), // Updates
-            Constraint::Percentage(10),  // Command line
+            Constraint::Percentage(17), // User balances
+            Constraint::Percentage(25), // Updates
+            Constraint::Percentage(8),  // Command line
         ]
         .as_ref(),
     )
@@ -53,18 +53,29 @@ pub fn render<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>) {
     .value_style(Style::default().add_modifier(Modifier::DIM))
     .label_style(Style::default().fg(Color::White))
     .data(&sample_data)
-    .max(100);
+    .max(10000);
 
+    // Now, render your updated widget on top.
     frame.render_widget(barchart, chunks[0]);
 
     // 2. Render user balances
-    let balances_text = format!(
-        "USD Balance: {}\n\
-         OSMO Balance: {}", 690, 450 // app.usd_balance, app.btc_balance
+    let usd_style = Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD);
+    let osmo_style = Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD);
+
+    let osmo_balance_span = Span::styled(
+        format!("OSMO Balance: {}", app.user_account.borrow().balance(Currency::OSMO)),
+        osmo_style
     );
+    
+    let usd_balance_span = Span::styled(
+        format!("USD Balance: {}", app.user_account.borrow().balance(Currency::USD)),
+        usd_style
+    );
+
+    let balances_text = vec![Spans::from(usd_balance_span), Spans::from(osmo_balance_span)];
     let block = Block::default().borders(Borders::ALL).title("User Balances");
     let para = Paragraph::new(balances_text).block(block);
-    frame.render_widget(para, chunks[2]);
+    frame.render_widget(para, chunks[1]);
 
     // 3. Render dynamic updates
     let update_text = app.updates.iter()
@@ -80,7 +91,7 @@ pub fn render<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>) {
 
     let block = Block::default().borders(Borders::ALL).title("Updates");
     let para = Paragraph::new(update_text).block(block);
-    frame.render_widget(para, chunks[3]);
+    frame.render_widget(para, chunks[2]);
 
 
     // 4. Render command line
@@ -90,5 +101,5 @@ pub fn render<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>) {
     ));
     let block = Block::default().borders(Borders::ALL).title("Command Line");
     let para = Paragraph::new(input_text).block(block);
-    frame.render_widget(para, chunks[4]);
+    frame.render_widget(para, chunks[3]);
 }

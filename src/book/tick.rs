@@ -12,7 +12,7 @@ pub struct Tick {
     #[get = "pub"]
     orders: VecDeque<Order>,
     #[get = "pub"]
-    total_orders: u64,
+    pub total_orders: u64,
 }
 
 // implement public constructor and getters for all fields
@@ -34,6 +34,7 @@ impl Tick {
         while remaining_quantity > 0 && self.orders.len() > 0 {
             let order = self.orders.front_mut().unwrap();
             remaining_quantity = order.fill_order(remaining_quantity);
+            
             if order.quantity() == &0 {
                 self.orders.pop_front();
             }
@@ -46,6 +47,7 @@ impl Tick {
         if order.order_type() != &OrderType::Limit {
             return Err("Order is not a limit order");
         }
+        self.total_orders += order.clone().quantity();
         self.orders.push_back(order);
         Ok(())
     }

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::process;
 
-#[derive(Getters)]
+#[derive(Getters, Debug)]
 pub struct Orderbook {
     book_id: u64,
     #[get = "pub"]
@@ -18,6 +18,7 @@ pub struct Orderbook {
     base_asset: Currency,
     next_bid_tick: u64,
     next_ask_tick: u64,
+    #[get = "pub"]
     ticks: BTreeMap<u64, Tick>,
     cancellation_map: HashMap<u64, u64>,
 }
@@ -92,8 +93,8 @@ impl Orderbook {
         Ok(())
     }
 
-    // Implement market bid abstraction that takes in a start tick and fills ticks as bids
-    fn run_market_bid(&mut self, order: &mut Order, end_tick: u64, quantity: u64) -> Result<u64, Box<dyn Error>> {
+    // Implement market bid abstraction that takes in a start tick and fills ticks as asks
+    fn run_market_ask(&mut self, order: &mut Order, end_tick: u64, quantity: u64) -> Result<u64, Box<dyn Error>> {
         let mut remaining_quantity = quantity;
         let mut to_remove = Vec::new();
     
@@ -105,7 +106,7 @@ impl Orderbook {
     
             while remaining_quantity > 0 && self.next_bid_tick != u64::MIN {
                 if let Some((tick_id, tick)) = tick_iter.next_back() {
-                    // If the next tick is below our start tick, we cut off the market bid process.
+                    // If the next tick is below our end tick tick, we cut off the market ask process.
                     if *tick_id <= end_tick {
                         self.next_bid_tick = end_tick;
                         break;
@@ -118,15 +119,18 @@ impl Orderbook {
                     remaining_quantity = tick.fill_tick(remaining_quantity);
                     let filled_quantity = pre_fill_remaining - remaining_quantity;
 
+                    tick.total_orders -= filled_quantity;
+
                     // Apply the exchange to the trader's balances
                     order.withdraw_deposited_assets(filled_quantity, *tick.tick_id())?;
                     order.distribute_filled_assets(filled_quantity, *tick.tick_id());
     
                     // If tick was fully filled, set to remove it from the book
                     if tick.orders().len() == 0 {
+                        tick.total_orders = 0;
                         to_remove.push(*tick_id);
                     }
-                }
+                } else { break }
             }
         }
     
@@ -139,8 +143,8 @@ impl Orderbook {
     }
     
 
-    // Implement market ask abstraction that takes in a start tick and fills ticks as asks
-    fn run_market_ask(&mut self, order: &mut Order, end_tick: u64, quantity: u64) -> Result<u64, Box<dyn Error>> {
+    // Implement market bid abstraction that takes in a start tick and fills ticks as bids
+    fn run_market_bid(&mut self, order: &mut Order, end_tick: u64, quantity: u64) -> Result<u64, Box<dyn Error>> {
         let mut remaining_quantity = quantity;
         let mut to_remove = Vec::new();
     
@@ -164,15 +168,18 @@ impl Orderbook {
                     remaining_quantity = tick.fill_tick(remaining_quantity);
                     let filled_quantity = pre_fill_remaining - remaining_quantity;
 
+                    tick.total_orders -= filled_quantity;
+
                     // Apply the exchange to the trader's balances
                     order.withdraw_deposited_assets(filled_quantity, *tick.tick_id())?;
                     order.distribute_filled_assets(filled_quantity, *tick.tick_id());
                     
                     // If tick was fully filled, set to it from the book
                     if tick.orders().len() == 0 {
+                        tick.total_orders = 0;
                         to_remove.push(*tick_id);
                     }
-                }
+                } else { break }
             }
         }
     
@@ -195,7 +202,7 @@ impl Orderbook {
                     remaining_quantity = self.run_market_bid(order, tick_id, remaining_quantity)?;
                 }
                 
-                if remaining_quantity > 0 && self.next_ask_tick != u64::MAX {
+                if remaining_quantity > 0 {
                     order.set_quantity(remaining_quantity);
                     self.run_place_limit(order)?;
                 }
@@ -206,7 +213,7 @@ impl Orderbook {
                     remaining_quantity = self.run_market_ask(order, tick_id, remaining_quantity)?;
                 }
 
-                if remaining_quantity > 0 && self.next_bid_tick != u64::MIN {
+                if remaining_quantity > 0 {
                     order.set_quantity(remaining_quantity);
                     self.run_place_limit(order)?;
                 }
@@ -222,10 +229,10 @@ impl Orderbook {
         let remaining_quantity = *order.quantity();
         match order.order_direction() {
             OrderDirection::Bid => {
-                self.run_market_bid(order, u64::MIN, remaining_quantity)?;
+                self.run_market_bid(order, u64::MAX, remaining_quantity)?;
             }
             OrderDirection::Ask => {
-                self.run_market_ask(order, u64::MAX, remaining_quantity)?;
+                self.run_market_ask(order, u64::MIN, remaining_quantity)?;
             }
         }
         Ok(())
@@ -274,7 +281,7 @@ mod tests {
 
     // implement test case where the order book's next ask tick is 10, and there are orders on ticks 10 to 15 (using helper above)
     #[test]
-    fn test_run_market_ask() {
+    fn test_run_market_bid() {
         let mut book = Orderbook::new(0);
 
         // set next ask tick on book to tick 10
@@ -303,7 +310,7 @@ mod tests {
         fund_account_for_order(&mut order);
         
         // System under test
-        book.run_market_ask(&mut order, u64::MAX, 1000).unwrap();
+        book.run_market_bid(&mut order, u64::MAX, 1000).unwrap();
 
         // ticks 10, 13, and 14 should all be emptied and removed from the book
         assert!(!book.ticks.contains_key(&10));
@@ -325,7 +332,7 @@ mod tests {
 
     // implement a similar run market ask test but with a specified end tick at 15
     #[test]
-    fn test_run_market_ask_with_end_tick() {
+    fn test_run_market_bid_with_end_tick() {
         let mut book = Orderbook::new(0);
 
         // set next ask tick on book to tick 10
@@ -356,7 +363,7 @@ mod tests {
         fund_account_for_order(&mut order);
 
         // System under test
-        book.run_market_ask(&mut order, 21, 1000).unwrap();
+        book.run_market_bid(&mut order, 21, 1000).unwrap();
 
         // ticks 10, 13, and 14 should all be emptied and removed from the book
         assert!(!book.ticks.contains_key(&10));
@@ -378,7 +385,7 @@ mod tests {
 
     // implement test for run_market_bid, which is similar to ask but in the opposite tick direction
     #[test]
-    fn test_run_market_bid() {
+    fn test_run_market_ask() {
         let mut book = Orderbook::new(0);
 
         // set next bid tick on book to tick 10
@@ -405,7 +412,7 @@ mod tests {
         fund_account_for_order(&mut order);
 
         // System under test
-        book.run_market_bid(&mut order, u64::MIN, 1000).unwrap();
+        book.run_market_ask(&mut order, u64::MIN, 1000).unwrap();
 
         // ticks 10, 13, and 14 should all be emptied and removed from the book
         assert!(!book.ticks.contains_key(&13));
@@ -427,7 +434,7 @@ mod tests {
 
     // now write test with cutoff on 13
     #[test]
-    fn test_run_market_bid_with_end_tick() {
+    fn test_run_market_ask_with_end_tick() {
         let mut book = Orderbook::new(0);
 
         // set next bid tick on book to tick 10
@@ -454,7 +461,7 @@ mod tests {
         fund_account_for_order(&mut order);
 
         // System under test
-        book.run_market_bid(&mut order, 13, 1000).unwrap();
+        book.run_market_ask(&mut order, 13, 1000).unwrap();
 
         // ticks 14 and 21 should be emptied and removed from the book
         assert!(!book.ticks.contains_key(&14));
