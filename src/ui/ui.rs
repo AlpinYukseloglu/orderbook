@@ -46,7 +46,7 @@ pub fn render<B: Backend>(app: &mut App, frame: &mut Frame<'_, B>) {
     .collect();
 
     let barchart = BarChart::default()
-    .block(Block::default().title("Orderbook").borders(Borders::ALL))
+    .block(Block::default().title("Orderbook: OSMO/USD").borders(Borders::ALL))
     .bar_width(3)
     .bar_gap(1)
     .bar_style(Style::default().fg(Color::Rgb(79,74,162)))
