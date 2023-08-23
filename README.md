@@ -5,7 +5,7 @@ This is an orderbook implementation written purely in Rust. It includes full sup
 
 ## Features
   
-- **Limit and Market Orders:** Create both limit orders (specifying a price) and market orders (executed immediately at the best available price).
+- **Limit and Market Orders:** Create both limit orders (specify a price) and market orders (execute immediately at the best available price).
   
 - **FIFO Matching Engine:** Executes orders at the best available price. Orders on the same price level are processed on a first-in, first-out basis.
   
@@ -49,8 +49,8 @@ Ensure you have Rust and Cargo installed on your system. If not, you can install
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/rust-orderbook.git
-cd rust-orderbook
+git clone https://github.com/AlpinYukseloglu/orderbook.git
+cd orderbook
 cargo build
 ```
 
