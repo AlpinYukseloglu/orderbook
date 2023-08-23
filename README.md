@@ -1,6 +1,6 @@
 # Rust Orderbook Implementation
 
-This is an orderbook implementation written purely in Rust. It includes full support for market and limit orders, a FIFO matching engine, an account system, and a terminal UI that can be seen here:
+This is an orderbook implementation written purely in Rust. It includes full support for market and limit orders, a FIFO matching engine, an account system, and a fully functional and interactive terminal UI that can be seen here:
 <img width="1169" alt="Screenshot 2023-08-20 at 11 16 15 PM" src="https://github.com/AlpinYukseloglu/orderbook/assets/62043214/993c2c0c-d0f7-44dd-a23d-0b01512b1407">
 
 ## Features
