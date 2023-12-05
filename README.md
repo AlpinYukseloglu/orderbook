@@ -35,3 +35,5 @@ cargo build
     ```
 
 2. Interact with the terminal UI to place orders, view balances, and more.
+
+![e](https://hackmd.io/_uploads/Hkgywl-6h.png)
